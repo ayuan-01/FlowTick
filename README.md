@@ -1,20 +1,17 @@
-<div align="center">
+# FlowTick
 
+<div align="center">
 <img src="https://img.shields.io/badge/Python-3.10+-blue?logo=python&logoColor=white" alt="Python">
 <img src="https://img.shields.io/badge/tkinter-builtin-green?logo=python&logoColor=white" alt="tkinter">
 <img src="https://img.shields.io/badge/Platform-Windows-0078D6?logo=windows&logoColor=white" alt="Windows">
 <img src="https://img.shields.io/github/license/ayuan-01/FlowTick" alt="License">
 <img src="https://img.shields.io/github/v/release/ayuan-01/FlowTick" alt="Release">
 
-# FlowTick
-
 **一个简洁美观的 Windows 桌面番茄钟应用**
 
 专注于时间管理，帮助你高效工作与休息
 
 [下载最新版](https://github.com/ayuan-01/FlowTick/releases/latest) · [报告问题](https://github.com/ayuan-01/FlowTick/issues)
-
-</div>
 
 ---
 
@@ -29,8 +26,9 @@
 ## 截图
 
 <div align="center">
-<img src="https://raw.githubusercontent.com/ayuan-01/FlowTick/main/assets/screenshot.png" alt="FlowTick 截图" width="500">
+<img src="https://cdn.jsdelivr.net/gh/ayuan-01/image-bed/fig/image-20260503231438041.png" alt="FlowTick 截图" width="500">
 </div>
+
 
 ## 快速开始
 

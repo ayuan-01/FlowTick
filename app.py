@@ -1,4 +1,8 @@
 import tkinter as tk
+import tkinter.font as tkfont
+import json
+import os
+import math
 from datetime import datetime
 from timer import Timer
 from config import (
@@ -6,30 +10,44 @@ from config import (
     WINDOW_WIDTH, WINDOW_HEIGHT, BG_COLOR,
 )
 
+FONT = "Helvetica"
+
+
+def _round_rect(canvas, x1, y1, x2, y2, r=12, **kwargs):
+    """在 Canvas 上绘制圆角矩形"""
+    points = [
+        x1 + r, y1, x2 - r, y1,
+        x2, y1, x2, y1 + r,
+        x2, y2 - r, x2, y2,
+        x2 - r, y2, x1 + r, y2,
+        x1, y2, x1, y2 - r,
+        x1, y1 + r, x1, y1,
+    ]
+    return canvas.create_polygon(points, smooth=True, **kwargs)
+
 
 class FlowTickApp:
     def __init__(self, root):
         self.root = root
         self.root.title("FlowTick")
         self.root.geometry(f"{WINDOW_WIDTH}x{WINDOW_HEIGHT}")
-        self.root.resizable(False, False)
         self.root.configure(bg=BG_COLOR)
 
-        self.show_seconds = False
         self.focus_min = DEFAULT_FOCUS_MIN
         self.break_min = DEFAULT_BREAK_MIN
 
         # 事件记录数据
-        self.events = []  # [{"title": str, "content": str}]
+        self.data_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "events.json")
+        self.events = self._load_events()
 
         self._build_ui()
+        self._refresh_log()
         self._init_timer()
         self._update_clock()
 
     # ── UI ─────────────────────────────────────────────
 
     def _build_ui(self):
-        # 主容器
         main = tk.Frame(self.root, bg=BG_COLOR)
         main.pack(fill=tk.BOTH, expand=True)
 
@@ -41,19 +59,18 @@ class FlowTickApp:
         left = tk.Frame(top, bg=BG_COLOR)
         left.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
-        self.clock_size = 130
+        self.clock_size = 160
         self.clock_canvas = tk.Canvas(
             left, width=self.clock_size, height=self.clock_size,
             bg=BG_COLOR, highlightthickness=0,
         )
-        self.clock_canvas.pack(pady=(10, 2))
+        self.clock_canvas.pack(pady=(8, 2))
 
         self.clock_label = tk.Label(
-            left, text="--:--", font=("黑体", 16),
+            left, text="--:--:--", font=(FONT, 18),
             bg=BG_COLOR, fg="#333333",
         )
         self.clock_label.pack()
-        self.clock_label.bind("<Button-1>", self._toggle_seconds)
 
         # 中间竖线分隔
         tk.Frame(top, width=1, bg="#c0d8f0").pack(side=tk.LEFT, fill=tk.Y, padx=5, pady=5)
@@ -63,19 +80,27 @@ class FlowTickApp:
         right.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
 
         self.mode_label = tk.Label(
-            right, text="专注", font=("黑体", 11),
+            right, text="专注", font=(FONT, 18, "bold"),
             bg=BG_COLOR, fg="#555555",
         )
-        self.mode_label.pack(pady=(10, 0))
+        self.mode_label.pack(pady=(20, 0))
+
+        # 倒计时圆角框
+        timer_box = tk.Canvas(
+            right, width=180, height=60,
+            bg=BG_COLOR, highlightthickness=0,
+        )
+        timer_box.pack(pady=(15, 0))
+        _round_rect(timer_box, 2, 2, 180, 60, r=14, fill="white", outline="#d0d8e0", width=1.5)
 
         self.timer_label = tk.Label(
-            right, text="25:00", font=("黑体", 30),
-            bg=BG_COLOR, fg="#333333",
+            timer_box, text="25:00", font=(FONT, 30),
+            bg="white", fg="#333333",
         )
-        self.timer_label.pack(expand=True)
+        timer_box.create_window(91, 31, window=self.timer_label)
 
         btn_row = tk.Frame(right, bg=BG_COLOR)
-        btn_row.pack(pady=(0, 10))
+        btn_row.pack(pady=(15, 10))
 
         icon_btn_style = dict(
             font=("黑体", 15), bg=BG_COLOR, bd=0,
@@ -86,45 +111,93 @@ class FlowTickApp:
             bg=BG_COLOR, bd=0, cursor="hand2",
             command=self._on_set_time,
         ).pack(side=tk.LEFT, padx=8)
-        self.toggle_btn = tk.Button(btn_row, text="▶", command=self._on_toggle, **icon_btn_style)
+        self.toggle_btn = tk.Button(btn_row, text="▶", width=2, command=self._on_toggle, **icon_btn_style)
         self.toggle_btn.pack(side=tk.LEFT, padx=8)
-        tk.Button(btn_row, text="↺", command=self._on_reset, **icon_btn_style).pack(side=tk.LEFT, padx=8)
+        tk.Button(btn_row, text="↺", font=("黑体", 15, "bold"), bg=BG_COLOR, bd=0, cursor="hand2", command=self._on_reset).pack(side=tk.LEFT, padx=8)
 
         # ── 分隔线 ──
         tk.Frame(main, height=1, bg="#c0d8f0").pack(fill=tk.X, padx=10, pady=5)
 
-        # ── 下半区：事件记录 ──
-        bottom = tk.Frame(main, bg=BG_COLOR)
-        bottom.pack(fill=tk.BOTH, expand=True, padx=10, pady=(0, 10))
+        # ── 下半区：事件记录卡片 ──
+        card_container = tk.Frame(main, bg=BG_COLOR)
+        card_container.pack(fill=tk.BOTH, expand=True, padx=10, pady=(0, 10))
 
-        log_header = tk.Frame(bottom, bg=BG_COLOR)
-        log_header.pack(fill=tk.X)
-        tk.Label(
-            log_header, text="事件记录", font=("黑体", 10, "bold"),
-            bg=BG_COLOR, fg="#333333",
-        ).pack(side=tk.LEFT)
-        tk.Button(
-            log_header, text="+", font=("黑体", 14),
-            bg=BG_COLOR, bd=0, cursor="hand2",
-            command=self._add_note,
-        ).pack(side=tk.RIGHT)
-
-        list_frame = tk.Frame(bottom, bg=BG_COLOR)
-        list_frame.pack(fill=tk.BOTH, expand=True)
-
-        scrollbar = tk.Scrollbar(list_frame)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-
-        self.log_list = tk.Listbox(
-            list_frame, yscrollcommand=scrollbar.set,
-            font=("黑体", 10), bg="white", fg="#333333",
-            selectbackground="#b3d4fc",
+        self.card_canvas = tk.Canvas(
+            card_container, bg=BG_COLOR, highlightthickness=0,
         )
-        self.log_list.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        scrollbar.config(command=self.log_list.yview)
+        self.card_canvas.pack(fill=tk.BOTH, expand=True)
 
-        self.log_list.bind("<Double-1>", self._edit_note)
-        self.log_list.bind("<Button-3>", self._show_context_menu)
+        # 可滚动事件列表
+        list_outer = tk.Frame(self.card_canvas, bg="white")
+
+        self.log_canvas = tk.Canvas(list_outer, bg="white", highlightthickness=0)
+        scrollbar = tk.Scrollbar(list_outer, command=self.log_canvas.yview)
+        self.log_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        self.log_canvas.configure(yscrollcommand=scrollbar.set)
+
+        self.log_inner = tk.Frame(self.log_canvas, bg="white")
+        self.log_canvas.create_window((0, 0), window=self.log_inner, anchor="nw")
+
+        self.log_inner.bind("<Configure>",
+                            lambda e: self.log_canvas.configure(scrollregion=self.log_canvas.bbox("all")))
+
+        # 滚轮支持
+        self.log_canvas.bind("<MouseWheel>", self._on_log_scroll)
+
+        # 动态重绘（窗口缩放时）
+        self._plus_btn = tk.Button(
+            self.card_canvas, text="+", font=(FONT, 18),
+            bg="white", bd=0, cursor="hand2",
+            command=self._add_note, fg="#333333",
+            activebackground="white",
+        )
+        self._list_outer = list_outer
+        self.card_canvas.bind("<Configure>", self._on_card_resize)
+
+    def _load_events(self):
+        try:
+            if os.path.exists(self.data_file):
+                with open(self.data_file, "r", encoding="utf-8") as f:
+                    return json.load(f)
+        except Exception:
+            pass
+        return []
+
+    def _save_events(self):
+        try:
+            with open(self.data_file, "w", encoding="utf-8") as f:
+                json.dump(self.events, f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
+
+    def _on_log_scroll(self, event):
+        self.log_canvas.yview_scroll(int(-event.delta / 120), "units")
+
+    def _on_card_resize(self, event):
+        c = self.card_canvas
+        w, h = event.width, event.height
+        if w < 60 or h < 80:
+            return
+        c.delete("card_bg")
+
+        # 阴影
+        _round_rect(c, 4, 4, w - 2, h - 2, r=12, fill="#c8d8e8", outline="", tags="card_bg")
+        # 卡片背景
+        _round_rect(c, 2, 2, w - 4, h - 4, r=12, fill="white", outline="#d0d8e0", width=1, tags="card_bg")
+
+        # 标题
+        c.create_text(16, 22, text="事件记录", font=(FONT, 15, "bold"),
+                      fill="#333333", anchor="w", tags="card_bg")
+        # + 按钮
+        c.create_window(w - 16, 22, window=self._plus_btn, anchor="e", tags="card_bg")
+
+        # 分隔线
+        c.create_line(12, 40, w - 12, 40, fill="#d0d8e0", width=1, tags="card_bg")
+
+        # 列表
+        c.create_window(10, 46, window=self._list_outer, anchor="nw",
+                        width=w - 20, height=h - 50, tags="card_bg")
 
     # ── Timer ──────────────────────────────────────────
 
@@ -175,17 +248,8 @@ class FlowTickApp:
 
     def _update_clock(self):
         now = datetime.now()
-
-        # 数字时间
-        if self.show_seconds:
-            text = now.strftime("%H:%M:%S")
-        else:
-            text = now.strftime("%H:%M")
-        self.clock_label.config(text=text)
-
-        # 模拟时钟
+        self.clock_label.config(text=now.strftime("%H:%M:%S"))
         self._draw_analog_clock(now)
-
         self.root.after(1000, self._update_clock)
 
     def _draw_analog_clock(self, now):
@@ -195,135 +259,194 @@ class FlowTickApp:
         cx, cy = s // 2, s // 2
         r = s // 2 - 8
 
-        # 表盘圆
-        c.create_oval(cx - r, cy - r, cx + r, cy + r, outline="#888888", width=2)
+        # 表盘背景（白色圆 + 外圈阴影）
+        c.create_oval(cx - r - 2, cy - r - 2, cx + r + 2, cy + r + 2, fill="#d0d0d0", outline="")
+        c.create_oval(cx - r, cy - r, cx + r, cy + r, fill="#f8f8f8", outline="#555555", width=1.5)
 
-        import math
+        # 内圈装饰
+        c.create_oval(cx - r + 6, cy - r + 6, cx + r - 6, cy + r - 6, outline="#e0e0e0", width=0.5)
 
-        # 刻度和数字
+        # 整点刻度和数字
         for i in range(1, 13):
             angle = math.radians(i * 30 - 90)
-            ix = cx + (r - 6) * math.cos(angle)
-            iy = cy + (r - 6) * math.sin(angle)
-            ox = cx + r * math.cos(angle)
-            oy = cy + r * math.sin(angle)
-            c.create_line(ix, iy, ox, oy, fill="#555555", width=2)
-            tx = cx + (r - 16) * math.cos(angle)
-            ty = cy + (r - 16) * math.sin(angle)
-            c.create_text(tx, ty, text=str(i), font=("Segoe UI", 7), fill="#333333")
+            cos_a, sin_a = math.cos(angle), math.sin(angle)
+            ix = cx + (r - 10) * cos_a
+            iy = cy + (r - 10) * sin_a
+            ox = cx + (r - 3) * cos_a
+            oy = cy + (r - 3) * sin_a
+            c.create_line(ix, iy, ox, oy, fill="#333333", width=2.5, capstyle=tk.ROUND)
+            tx = cx + (r - 22) * cos_a
+            ty = cy + (r - 22) * sin_a
+            c.create_text(tx, ty, text=str(i), font=(FONT, 9, "bold"), fill="#333333")
 
         # 分钟刻度
         for i in range(60):
             if i % 5 != 0:
                 angle = math.radians(i * 6 - 90)
-                ix = cx + (r - 3) * math.cos(angle)
-                iy = cy + (r - 3) * math.sin(angle)
-                ox = cx + r * math.cos(angle)
-                oy = cy + r * math.sin(angle)
-                c.create_line(ix, iy, ox, oy, fill="#aaaaaa", width=1)
+                cos_a, sin_a = math.cos(angle), math.sin(angle)
+                ix = cx + (r - 5) * cos_a
+                iy = cy + (r - 5) * sin_a
+                ox = cx + (r - 3) * cos_a
+                oy = cy + (r - 3) * sin_a
+                c.create_line(ix, iy, ox, oy, fill="#aaaaaa", width=0.8)
 
         h = now.hour % 12
         m = now.minute
         s_now = now.second
 
+        def _hand_points(angle_deg, length, tail, width):
+            a = math.radians(angle_deg - 90)
+            perp = math.radians(angle_deg)
+            cos_a, sin_a = math.cos(a), math.sin(a)
+            cos_p, sin_p = math.cos(perp), math.sin(perp)
+            hw = width / 2
+            return [
+                cx + length * cos_a, cy + length * sin_a,
+                cx + hw * cos_p - tail * 0.3 * cos_a, cy + hw * sin_p - tail * 0.3 * sin_a,
+                cx - tail * cos_a + hw * 0.5 * cos_p, cy - tail * sin_a + hw * 0.5 * sin_p,
+                cx - tail * cos_a - hw * 0.5 * cos_p, cy - tail * sin_a - hw * 0.5 * sin_p,
+                cx - hw * cos_p - tail * 0.3 * cos_a, cy - hw * sin_p - tail * 0.3 * sin_a,
+            ]
+
         # 时针
-        h_angle = math.radians((h + m / 60) * 30 - 90)
-        hx = cx + (r - 30) * math.cos(h_angle)
-        hy = cy + (r - 30) * math.sin(h_angle)
-        c.create_line(cx, cy, hx, hy, fill="#333333", width=3, capstyle=tk.ROUND)
+        h_angle = (h + m / 60) * 30
+        pts = _hand_points(h_angle, r - 38, 10, 7)
+        c.create_polygon(pts, fill="#333333", outline="#222222", smooth=True)
 
         # 分针
-        m_angle = math.radians((m + s_now / 60) * 6 - 90)
-        mx = cx + (r - 18) * math.cos(m_angle)
-        my = cy + (r - 18) * math.sin(m_angle)
-        c.create_line(cx, cy, mx, my, fill="#555555", width=2, capstyle=tk.ROUND)
+        m_angle = (m + s_now / 60) * 6
+        pts = _hand_points(m_angle, r - 22, 14, 4.5)
+        c.create_polygon(pts, fill="#555555", outline="#444444", smooth=True)
 
         # 秒针
-        s_angle = math.radians(s_now * 6 - 90)
-        sx = cx + (r - 10) * math.cos(s_angle)
-        sy = cy + (r - 10) * math.sin(s_angle)
-        c.create_line(cx, cy, sx, sy, fill="#e04040", width=1, capstyle=tk.ROUND)
+        s_angle = s_now * 6
+        sa = math.radians(s_angle - 90)
+        cos_sa, sin_sa = math.cos(sa), math.sin(sa)
+        tail_x = cx - 16 * cos_sa
+        tail_y = cy - 16 * sin_sa
+        c.create_line(tail_x, tail_y, cx, cy, fill="#e04040", width=1)
+        tip_x = cx + (r - 14) * cos_sa
+        tip_y = cy + (r - 14) * sin_sa
+        c.create_line(cx, cy, tip_x, tip_y, fill="#e04040", width=1.5, capstyle=tk.ROUND)
+        c.create_oval(tip_x - 2, tip_y - 2, tip_x + 2, tip_y + 2, fill="#e04040", outline="")
 
-        # 中心圆点
-        c.create_oval(cx - 3, cy - 3, cx + 3, cy + 3, fill="#e04040", outline="")
-
-    def _toggle_seconds(self, event=None):
-        self.show_seconds = not self.show_seconds
+        # 中心轴
+        c.create_oval(cx - 6, cy - 6, cx + 6, cy + 6, fill="#555555", outline="#444444")
+        c.create_oval(cx - 3, cy - 3, cx + 3, cy + 3, fill="#e04040", outline="#cc3030")
+        c.create_oval(cx - 1, cy - 1, cx + 1, cy + 1, fill="#ff6060", outline="")
 
     # ── 事件记录 ───────────────────────────────────────
+
+    def _truncate(self, text, font_spec, max_width):
+        """截断文本到指定像素宽度，末尾加省略号"""
+        f = tkfont.Font(font=font_spec)
+        if f.measure(text) <= max_width:
+            return text
+        while len(text) > 1 and f.measure(text + "…") > max_width:
+            text = text[:-1]
+        return text + "…"
+
+    def _refresh_log(self):
+        for w in self.log_inner.winfo_children():
+            w.destroy()
+
+        for idx, ev in enumerate(self.events):
+            # 分隔线
+            if idx > 0:
+                tk.Frame(self.log_inner, height=1, bg="#e8e8e8").pack(fill=tk.X, padx=8, pady=(4, 0))
+
+            # 条目容器（支持高亮和右键）
+            item = tk.Frame(self.log_inner, bg="white")
+            item.pack(fill=tk.X, padx=8, pady=2)
+
+            title_lbl = tk.Label(
+                item, text=ev["title"], font=("宋体", 12, "bold"),
+                fg="#222222", bg="white", anchor="w",
+            )
+            title_lbl.pack(fill=tk.X, padx=4, pady=(4, 0))
+
+            if ev["content"]:
+                font_spec = ("宋体", 10)
+                display = self._truncate(ev["content"], font_spec, 420)
+                content_lbl = tk.Label(
+                    item, text=display, font=font_spec,
+                    fg="#666666", bg="white", anchor="w",
+                )
+                content_lbl.pack(fill=tk.X, padx=4, pady=(0, 4))
+
+            # 绑定事件
+            for widget in (item, title_lbl):
+                widget.bind("<Double-1>", lambda e, i=idx: self._edit_note_at(i))
+                widget.bind("<Button-3>", lambda e, i=idx: self._show_ctx_at(e, i))
+            if ev["content"]:
+                content_lbl.bind("<Double-1>", lambda e, i=idx: self._edit_note_at(i))
+                content_lbl.bind("<Button-3>", lambda e, i=idx: self._show_ctx_at(e, i))
+
+        # 更新滚动区域
+        self.log_inner.update_idletasks()
+        self.log_canvas.configure(scrollregion=self.log_canvas.bbox("all"))
 
     def _add_note(self):
         dlg = NoteDialog(self.root, "添加笔记")
         if dlg.result:
             title, content = dlg.result
             self.events.append({"title": title, "content": content})
-            self.log_list.insert(tk.END, title)
+            self._save_events()
+            self._refresh_log()
+            self.log_canvas.yview_moveto(1.0)
 
-    def _edit_note(self, event=None):
-        sel = self.log_list.curselection()
-        if not sel:
-            return
-        idx = sel[0]
+    def _edit_note_at(self, idx):
         ev = self.events[idx]
         dlg = NoteDialog(self.root, "编辑笔记", title=ev["title"], content=ev["content"])
         if dlg.result:
             title, content = dlg.result
             self.events[idx] = {"title": title, "content": content}
-            self.log_list.delete(idx)
-            self.log_list.insert(idx, title)
+            self._save_events()
+            self._refresh_log()
 
-    def _delete_note(self):
-        sel = self.log_list.curselection()
-        if not sel:
-            return
-        idx = sel[0]
-        self.log_list.delete(idx)
+    def _delete_note_at(self, idx):
         self.events.pop(idx)
+        self._save_events()
+        self._refresh_log()
 
-    def _show_context_menu(self, event):
-        sel = self.log_list.nearest(event.y)
-        if sel < 0 or sel >= len(self.events):
-            return
-        self.log_list.selection_clear(0, tk.END)
-        self.log_list.selection_set(sel)
-
+    def _show_ctx_at(self, event, idx):
         menu = tk.Menu(self.root, tearoff=0)
-        menu.add_command(label="删除", command=self._delete_note)
+        menu.add_command(label="删除", command=lambda: self._delete_note_at(idx))
         menu.post(event.x_root, event.y_root)
 
 
 # ── 对话框 ─────────────────────────────────────────────
 
 class NoteDialog:
-    """添加/编辑笔记对话框，包含标题和内容两个输入框"""
-
     def __init__(self, parent, title_text, title="", content=""):
         self.result = None
 
         self.dlg = tk.Toplevel(parent)
         self.dlg.title(title_text)
-        self.dlg.geometry("320x220")
         self.dlg.resizable(False, False)
         self.dlg.transient(parent)
         self.dlg.grab_set()
 
+        x, y = parent.winfo_pointerxy()
+        self.dlg.geometry(f"320x220+{x - 160}+{y - 110}")
+
         frame = tk.Frame(self.dlg, padx=10, pady=10)
         frame.pack(fill=tk.BOTH, expand=True)
 
-        tk.Label(frame, text="标题：").grid(row=0, column=0, sticky="w")
-        self.title_entry = tk.Entry(frame, width=30)
+        tk.Label(frame, text="标题：", font=(FONT, 11), fg="#333333").grid(row=0, column=0, sticky="w")
+        self.title_entry = tk.Entry(frame, width=30, font=(FONT, 11))
         self.title_entry.grid(row=0, column=1, padx=5, pady=5)
         self.title_entry.insert(0, title)
 
-        tk.Label(frame, text="内容：").grid(row=1, column=0, sticky="nw")
-        self.content_text = tk.Text(frame, width=30, height=6)
+        tk.Label(frame, text="内容：", font=(FONT, 11), fg="#333333").grid(row=1, column=0, sticky="nw")
+        self.content_text = tk.Text(frame, width=30, height=6, font=(FONT, 11))
         self.content_text.grid(row=1, column=1, padx=5, pady=5)
         self.content_text.insert("1.0", content)
 
         btn_frame = tk.Frame(frame)
         btn_frame.grid(row=2, column=0, columnspan=2, pady=(10, 0))
-        tk.Button(btn_frame, text="确定", width=8, command=self._ok).pack(side=tk.LEFT, padx=5)
-        tk.Button(btn_frame, text="取消", width=8, command=self.dlg.destroy).pack(side=tk.LEFT, padx=5)
+        tk.Button(btn_frame, text="确定", width=8, font=(FONT, 10), command=self._ok).pack(side=tk.LEFT, padx=5)
+        tk.Button(btn_frame, text="取消", width=8, font=(FONT, 10), command=self.dlg.destroy).pack(side=tk.LEFT, padx=5)
 
         self.title_entry.focus_set()
         self.dlg.wait_window()
@@ -337,35 +460,35 @@ class NoteDialog:
 
 
 class TimeDialog:
-    """设置专注和休息时长"""
-
     def __init__(self, parent, focus_min, break_min):
         self.result = None
 
         self.dlg = tk.Toplevel(parent)
         self.dlg.title("设置时间")
-        self.dlg.geometry("240x140")
         self.dlg.resizable(False, False)
         self.dlg.transient(parent)
         self.dlg.grab_set()
 
+        x, y = parent.winfo_pointerxy()
+        self.dlg.geometry(f"240x140+{x - 120}+{y - 70}")
+
         frame = tk.Frame(self.dlg, padx=10, pady=10)
         frame.pack(fill=tk.BOTH, expand=True)
 
-        tk.Label(frame, text="专注（分钟）：").grid(row=0, column=0, sticky="w")
-        self.focus_entry = tk.Entry(frame, width=8)
+        tk.Label(frame, text="专注（分钟）：", font=(FONT, 11), fg="#333333").grid(row=0, column=0, sticky="w")
+        self.focus_entry = tk.Entry(frame, width=8, font=(FONT, 11))
         self.focus_entry.grid(row=0, column=1, padx=5, pady=5)
         self.focus_entry.insert(0, str(focus_min))
 
-        tk.Label(frame, text="休息（分钟）：").grid(row=1, column=0, sticky="w")
-        self.break_entry = tk.Entry(frame, width=8)
+        tk.Label(frame, text="休息（分钟）：", font=(FONT, 11), fg="#333333").grid(row=1, column=0, sticky="w")
+        self.break_entry = tk.Entry(frame, width=8, font=(FONT, 11))
         self.break_entry.grid(row=1, column=1, padx=5, pady=5)
         self.break_entry.insert(0, str(break_min))
 
         btn_frame = tk.Frame(frame)
         btn_frame.grid(row=2, column=0, columnspan=2, pady=(10, 0))
-        tk.Button(btn_frame, text="确定", width=8, command=self._ok).pack(side=tk.LEFT, padx=5)
-        tk.Button(btn_frame, text="取消", width=8, command=self.dlg.destroy).pack(side=tk.LEFT, padx=5)
+        tk.Button(btn_frame, text="确定", width=8, font=(FONT, 10), command=self._ok).pack(side=tk.LEFT, padx=5)
+        tk.Button(btn_frame, text="取消", width=8, font=(FONT, 10), command=self.dlg.destroy).pack(side=tk.LEFT, padx=5)
 
         self.focus_entry.focus_set()
         self.dlg.wait_window()

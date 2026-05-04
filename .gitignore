@@ -4,3 +4,7 @@ dist/
 *.spec
 .idea/
 .claude/
+events.json
+notes.json
+stats.json
+settings.json

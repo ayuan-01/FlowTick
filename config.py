@@ -4,8 +4,9 @@ DEFAULT_BREAK_MIN = 5
 DEFAULT_LONG_BREAK_MIN = 15
 
 # 窗口
-WINDOW_WIDTH = 800
-WINDOW_HEIGHT = 560
+WINDOW_WIDTH = 600
+WINDOW_HEIGHT = 400
+SIDEBAR_WIDTH = 64
 BG_COLOR = "#eef1f5"
 
 # 默认设置
@@ -34,4 +35,9 @@ LIGHT_COLORS = {
     "hover":   "#e8ecf1",
     "active":  "#d8dee6",
     "item_bg": "#f7f9fb",
+    "sidebar":  "#1e293b",
+    "sb_hover": "#334155",
+    "sb_active":"#475569",
+    "sb_text":  "#94a3b8",
+    "sb_sel":   "#e2e8f0",
 }

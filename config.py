@@ -1,7 +1,9 @@
-# 默认番茄钟时长（分钟）
-DEFAULT_FOCUS_MIN = 25
-DEFAULT_BREAK_MIN = 5
-DEFAULT_LONG_BREAK_MIN = 15
+# 默认番茄钟节奏（分钟）
+DEFAULT_RHYTHM_FOCUS = 25
+DEFAULT_RHYTHM_BREAK = 5
+DEFAULT_RHYTHM_LONG_BREAK = 15
+DEFAULT_RHYTHM_LONG_INTERVAL = 4
+DEFAULT_FOCUS_TOTAL_MIN = 60
 
 # 窗口
 WINDOW_WIDTH = 600
@@ -15,9 +17,11 @@ DEFAULT_SETTINGS = {
     "auto_start_focus": False,
     "always_on_top": False,
     "minimize_to_tray": True,
-    "long_break_min": 15,
-    "long_break_interval": 4,
-    "daily_goal": 8,
+    "focus_total_min": 60,
+    "rhythm_focus": 25,
+    "rhythm_break": 5,
+    "rhythm_long_break": 15,
+    "rhythm_long_interval": 4,
     "idle_detection": False,
     "idle_timeout_min": 5,
 }
@@ -35,9 +39,9 @@ LIGHT_COLORS = {
     "hover":   "#e8ecf1",
     "active":  "#d8dee6",
     "item_bg": "#f7f9fb",
-    "sidebar":  "#1e293b",
-    "sb_hover": "#334155",
-    "sb_active":"#475569",
-    "sb_text":  "#94a3b8",
-    "sb_sel":   "#e2e8f0",
+    "sidebar":  "#eceef1",
+    "sb_hover": "#dfe2e7",
+    "sb_active":"#d2d6dd",
+    "sb_text":  "#6b7280",
+    "sb_sel":   "#2a2a2a",
 }

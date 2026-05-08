@@ -28,7 +28,7 @@ class FlowTickApp:
         self.root.geometry(f"{WINDOW_WIDTH}x{WINDOW_HEIGHT}+{sx}+{sy}")
 
         # Logo
-        _script_dir = os.path.dirname(os.path.abspath(__file__))
+        _script_dir = sys._MEIPASS if getattr(sys, 'frozen', False) else os.path.dirname(os.path.abspath(__file__))
         self._logo_path = os.path.join(_script_dir, "fig", "LOGO_1.png")
         if os.path.exists(self._logo_path):
             try:
@@ -62,6 +62,10 @@ class FlowTickApp:
         self.notes = self._load_notes()
         self.folders = self._load_json(self.folders_file)
         self._current_folder = None  # None=全部
+        self._drag_note_idx = None
+        self._dragging = False
+        self._drag_start_x = 0
+        self._drag_start_y = 0
         self.events = self._load_json(self.events_file)
         self.stats = self._load_stats()
         self.todos = self._load_json(self.todos_file)
@@ -725,8 +729,11 @@ class FlowTickApp:
             if content_lbl:
                 widgets.append(content_lbl)
             for widget in widgets:
-                widget.bind("<Double-1>", lambda e, i=idx: self._edit_note_at(i))
+                widget.bind("<Double-1>", lambda e, i=idx: self._edit_note_at(i) if not self._dragging else None)
                 widget.bind("<Button-3>", lambda e, i=idx: self._show_note_ctx(e, i))
+                widget.bind("<ButtonPress-1>", lambda e, i=idx: self._on_note_press(e, i))
+                widget.bind("<B1-Motion>", self._on_note_motion)
+                widget.bind("<ButtonRelease-1>", self._on_note_release)
 
         self._bind_scroll_recursive(self.notes_log_canvas, self.notes_inner)
         self.notes_inner.update_idletasks()
@@ -793,6 +800,49 @@ class FlowTickApp:
         self._current_folder = folder_id
         self._refresh_folder_list()
         self._refresh_notes()
+
+    def _on_note_press(self, event, idx):
+        self._drag_note_idx = idx
+        self._dragging = False
+        self._drag_start_x = event.x_root
+        self._drag_start_y = event.y_root
+
+    def _on_note_motion(self, event):
+        dx = abs(event.x_root - self._drag_start_x)
+        dy = abs(event.y_root - self._drag_start_y)
+        if dx > 5 or dy > 5:
+            self._dragging = True
+
+    def _on_note_release(self, event):
+        if self._dragging:
+            self._drop_note_to_folder(event.x_root, event.y_root)
+        self._dragging = False
+        self._drag_note_idx = None
+
+    def _drop_note_to_folder(self, x, y):
+        target_widget = self.root.winfo_containing(x, y)
+        target_folder_id = None
+        w = target_widget
+        while w:
+            if hasattr(w, "_folder_id"):
+                target_folder_id = w._folder_id
+                break
+            w = w.master
+        if target_folder_id is None and target_widget is not None:
+            pw = target_widget.winfo_parent()
+            if pw:
+                try:
+                    pw_widget = target_widget._nametowidget(pw)
+                    if hasattr(pw_widget, "_folder_id"):
+                        target_folder_id = pw_widget._folder_id
+                except Exception:
+                    pass
+        if target_folder_id is not None and self._drag_note_idx is not None:
+            if 0 <= self._drag_note_idx < len(self.notes):
+                if self.notes[self._drag_note_idx].get("folder_id", "") != target_folder_id:
+                    self.notes[self._drag_note_idx]["folder_id"] = target_folder_id
+                    self._save_notes()
+                    self._refresh_notes()
 
     def _add_folder(self):
         dlg = FolderDialog(self.root, "新建文件夹")

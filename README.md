@@ -60,7 +60,7 @@ python main.py
 
 ```bash
 pip install pyinstaller pystray Pillow
-pyinstaller --onefile --windowed --name FlowTick main.py
+pyinstaller FlowTick.spec
 ```
 
 生成的可执行文件位于 `dist/FlowTick.exe`。

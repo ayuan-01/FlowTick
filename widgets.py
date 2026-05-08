@@ -162,6 +162,12 @@ def _rounded_entry(parent, font_spec, placeholder=""):
     if placeholder:
         entry.insert(0, placeholder)
         entry.config(fg=_C["mute"])
+
+    def _focus_entry(e):
+        entry.focus_set()
+        return "break"
+    cv.bind("<Button-1>", _focus_entry)
+
     wrapper._entry = entry
     return wrapper, entry
 
@@ -193,6 +199,12 @@ def _rounded_text(parent, font_spec, height=4):
                          width=12, height=inner_h - 16, tags="sb_win")
 
     cv.bind("<Configure>", _draw)
+
+    def _focus_text(e):
+        text.focus_set()
+        return "break"
+    cv.bind("<Button-1>", _focus_text)
+
     wrapper._text = text
     return wrapper, text
 
@@ -218,6 +230,12 @@ def _rounded_spinbox(parent, font_spec, from_, to_, textvariable):
                          width=e.width - 20, height=24, tags="spin_win")
 
     cv.bind("<Configure>", _draw)
+
+    def _focus_spin(e):
+        spin.focus_set()
+        return "break"
+    cv.bind("<Button-1>", _focus_spin)
+
     wrapper._spin = spin
     return wrapper, spin
 

@@ -1,3 +1,4 @@
+
 import tkinter as tk
 from widgets import FTK, _C, _canvas_btn, _rounded_entry, _rounded_text, _rounded_spinbox
 
@@ -28,7 +29,7 @@ class NoteDialog:
         self.dlg.transient(parent)
         self.dlg.grab_set()
         self.dlg.configure(bg=_C["bg"])
-        self.dlg.minsize(380, 320)
+        self.dlg.minsize(380, 420)
 
         card = tk.Frame(self.dlg, bg=_C["card"], padx=16, pady=14)
         card.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
@@ -78,15 +79,16 @@ class NoteDialog:
         _canvas_btn(btn_row, "确定", self._ok, w=70).pack(side=tk.LEFT, padx=(0, 6))
         _canvas_btn(btn_row, "取消", self.dlg.destroy, w=70).pack(side=tk.LEFT)
 
+        self.dlg.update_idletasks()
         w = max(440, self.dlg.winfo_reqwidth())
-        h = max(380, self.dlg.winfo_reqheight())
+        h = max(430, self.dlg.winfo_reqheight())
         px = parent.winfo_rootx() + (parent.winfo_width() - w) // 2
         py = parent.winfo_rooty() + (parent.winfo_height() - h) // 2
         self.dlg.geometry(f"{w}x{h}+{px}+{py}")
         self.dlg.deiconify()
 
         self.title_entry.focus_set()
-        self.dlg.bind("<Button-1>", lambda e: _dismiss_focus(e, self.dlg))
+        card.bind("<Button-1>", lambda e: _dismiss_focus(e, self.dlg))
         self.dlg.wait_window()
 
     def _ok(self):
@@ -156,7 +158,7 @@ class SessionDialog:
 
         spin.focus_set()
         spin.selection_range(0, tk.END)
-        self.dlg.bind("<Button-1>", lambda e: _dismiss_focus(e, self.dlg))
+        card.bind("<Button-1>", lambda e: _dismiss_focus(e, self.dlg))
         self.dlg.wait_window()
 
     def _ok(self):
@@ -239,7 +241,7 @@ class FolderDialog:
         self.dlg.deiconify()
 
         self._entry.focus_set()
-        self.dlg.bind("<Button-1>", lambda e: _dismiss_focus(e, self.dlg))
+        card.bind("<Button-1>", lambda e: _dismiss_focus(e, self.dlg))
         self.dlg.wait_window()
 
     def _ok(self):

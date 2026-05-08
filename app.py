@@ -1301,7 +1301,7 @@ class FlowTickApp:
         add_toggle("idle_detection", "闲置检测（无操作自动暂停）")
         add_spin("idle_timeout_min", "闲置超时（分钟）", 1, 30)
 
-        tk.Label(card, text="FlowTick V1.0", font=(FTK, 9),
+        tk.Label(card, text="FlowTick V2.0", font=(FTK, 9),
                  fg=_C["mute"], bg=_C["card"]).pack(pady=(20, 0))
 
         self._settings_outer.update_idletasks()

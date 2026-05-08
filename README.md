@@ -6,6 +6,7 @@
 <img src="https://img.shields.io/badge/Platform-Windows-0078D6?logo=windows&logoColor=white" alt="Windows">
 <img src="https://img.shields.io/github/license/ayuan-01/FlowTick" alt="License">
 <img src="https://img.shields.io/github/v/release/ayuan-01/FlowTick" alt="Release">
+</div>
 
 **一个简洁美观的 Windows 桌面番茄钟应用**
 

@@ -89,6 +89,7 @@ class NoteDialog:
 
         self.title_entry.focus_set()
         card.bind("<Button-1>", lambda e: _dismiss_focus(e, self.dlg))
+        self.dlg.bind("<Return>", lambda e: self._ok() if self.dlg.focus_get() != self.content_text else None)
         self.dlg.wait_window()
 
     def _ok(self):
@@ -159,6 +160,7 @@ class SessionDialog:
         spin.focus_set()
         spin.selection_range(0, tk.END)
         card.bind("<Button-1>", lambda e: _dismiss_focus(e, self.dlg))
+        self.dlg.bind("<Return>", lambda e: self._ok())
         self.dlg.wait_window()
 
     def _ok(self):
@@ -242,6 +244,7 @@ class FolderDialog:
 
         self._entry.focus_set()
         card.bind("<Button-1>", lambda e: _dismiss_focus(e, self.dlg))
+        self.dlg.bind("<Return>", lambda e: self._ok())
         self.dlg.wait_window()
 
     def _ok(self):

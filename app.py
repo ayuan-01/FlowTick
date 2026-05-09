@@ -6,6 +6,7 @@ import sys
 import shutil
 import math
 import threading
+import time
 import winsound
 from datetime import datetime, timedelta
 from timer import Timer
@@ -56,6 +57,7 @@ class FlowTickApp:
         self.settings_file = os.path.join(base_dir, "settings.json")
         self.todos_file = os.path.join(base_dir, "todos.json")
         self.folders_file = os.path.join(base_dir, "folders.json")
+        self.session_file = os.path.join(base_dir, "session.json")
 
         # 加载数据
         self.settings = self._load_settings()
@@ -95,7 +97,7 @@ class FlowTickApp:
     @staticmethod
     def _is_click_on_focusable(widget):
         w = widget
-        while w:
+        while w is not None and not isinstance(w, str):
             try:
                 if w.winfo_toplevel() == w:
                     return True
@@ -320,6 +322,9 @@ class FlowTickApp:
         self.skip_btn = _canvas_btn(self._btn_row, "⏭", self._on_skip)
         self.skip_btn.pack(side=tk.LEFT, padx=8)
         _bind_tooltip(self.skip_btn, "跳过当前段")
+        self.stop_btn = _canvas_btn(self._btn_row, "■", self._on_terminate)
+        self.stop_btn.pack(side=tk.LEFT, padx=8)
+        _bind_tooltip(self.stop_btn, "终止会话")
         self.reset_btn = _canvas_btn(self._btn_row, "↺", self._on_reset)
         self.reset_btn.pack(side=tk.LEFT, padx=8)
         _bind_tooltip(self.reset_btn, "重置 (R)")
@@ -366,18 +371,29 @@ class FlowTickApp:
         self._folder_panel = tk.Frame(page, bg=_C["sidebar"], width=100)
         self._folder_panel.pack(side=tk.LEFT, fill=tk.Y)
         self._folder_panel.pack_propagate(False)
+        self._folder_panel_width = 100
 
         self._folder_inner = tk.Frame(self._folder_panel, bg=_C["sidebar"])
         self._folder_inner.pack(fill=tk.BOTH, expand=True, pady=(8, 0))
 
         # 底部新建按钮
         add_folder_btn = tk.Label(self._folder_panel, text="+ 新建文件夹",
-                                  font=(FTK, 9), fg=_C["sb_text"], bg=_C["sidebar"],
+                                  font=(FTK, 10), fg=_C["sb_text"], bg=_C["sidebar"],
                                   cursor="hand2", height=2)
         add_folder_btn.pack(side=tk.BOTTOM, fill=tk.X)
         add_folder_btn.bind("<Button-1>", lambda e: self._add_folder())
         add_folder_btn.bind("<Enter>", lambda e: add_folder_btn.config(fg=_C["sb_sel"]))
         add_folder_btn.bind("<Leave>", lambda e: add_folder_btn.config(fg=_C["sb_text"]))
+
+        # 可拖动分隔线
+        self._splitter = tk.Frame(page, bg=_C["border"], width=5, cursor="sb_h_double_arrow")
+        self._splitter.pack(side=tk.LEFT, fill=tk.Y)
+        self._splitter.pack_propagate(False)
+        self._splitter.bind("<ButtonPress-1>", self._split_press)
+        self._splitter.bind("<B1-Motion>", self._split_motion)
+        self._splitter.bind("<ButtonRelease-1>", self._split_release)
+        self._split_start_x = 0
+        self._split_start_w = 100
 
         # 右侧笔记区
         right_frame = tk.Frame(page, bg=_C["bg"])
@@ -414,6 +430,41 @@ class FlowTickApp:
         self.notes_canvas.bind("<Configure>", self._on_notes_resize)
 
         self._refresh_folder_list()
+
+    def _split_press(self, e):
+        self._split_start_x = e.x_root
+        self._split_start_w = self._folder_panel_width
+
+    def _split_motion(self, e):
+        delta = e.x_root - self._split_start_x
+        new_w = max(60, min(300, self._split_start_w + delta))
+        self._folder_panel_width = new_w
+        self._folder_panel.config(width=new_w)
+        self._truncate_all_folder_names()
+
+    def _split_release(self, e):
+        pass
+
+    def _truncate_label(self, lbl, full_name, max_width):
+        fnt = tkfont.Font(font=lbl.cget("font"))
+        if fnt.measure(full_name) <= max_width:
+            lbl.config(text=full_name)
+            lbl._full_name = full_name
+            lbl._truncated = False
+            return
+        text = full_name
+        while len(text) > 1 and fnt.measure(text + "…") > max_width:
+            text = text[:-1]
+        lbl.config(text=text + "…")
+        lbl._full_name = full_name
+        lbl._truncated = True
+
+    def _truncate_all_folder_names(self):
+        max_w = self._folder_panel_width - 15
+        for wrapper in self._folder_inner.winfo_children():
+            lbl = getattr(wrapper, '_lbl', None)
+            if lbl and hasattr(lbl, '_full_name'):
+                self._truncate_label(lbl, lbl._full_name, max_w)
 
     # ── 待办页 ────────────────────────────────────────
 
@@ -488,6 +539,95 @@ class FlowTickApp:
     def _save_events(self):
         self._save_json(self.events_file, self.events)
 
+    def _save_session(self):
+        """保存当前会话状态到 session.json"""
+        t = self.timer
+        if t.state in (Timer.RUNNING, Timer.PAUSED):
+            data = {
+                "state": t.state,
+                "current_idx": t.current_idx,
+                "segment_remaining": t.segment_remaining,
+                "focus_accumulated": t.focus_accumulated,
+                "focus_total": t.focus_total,
+                "focus_topic": self.focus_topic,
+                "timestamp": time.time(),
+            }
+            self._save_json(self.session_file, data)
+        else:
+            # IDLE 状态清除 session 文件
+            try:
+                if os.path.exists(self.session_file):
+                    os.remove(self.session_file)
+            except OSError:
+                pass
+
+    def _load_session(self):
+        """启动时恢复会话状态"""
+        if not os.path.exists(self.session_file):
+            return False
+        try:
+            with open(self.session_file, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except Exception:
+            return False
+
+        state = data.get("state", Timer.IDLE)
+        if state == Timer.IDLE:
+            return False
+
+        current_idx = data.get("current_idx", 0)
+        segment_remaining = data.get("segment_remaining", 0)
+        focus_accumulated = data.get("focus_accumulated", 0)
+        focus_total = data.get("focus_total", 0)
+        self.focus_topic = data.get("focus_topic", "")
+        timestamp = data.get("timestamp", time.time())
+
+        # 重建 segments
+        self._build_session()
+        if not self.timer.segments or current_idx >= len(self.timer.segments):
+            return False
+
+        # 时间漂移修正
+        if state == Timer.RUNNING:
+            elapsed = int(time.time() - timestamp)
+            segment_remaining -= elapsed
+            # 快进跳过已过期的 segments
+            while segment_remaining <= 0 and current_idx < len(self.timer.segments) - 1:
+                seg_type, seg_min = self.timer.segments[current_idx]
+                if seg_type == Timer.FOCUS:
+                    focus_accumulated += seg_min
+                current_idx += 1
+                segment_remaining += self.timer.segments[current_idx][1] * 60
+
+            if focus_accumulated >= focus_total or current_idx >= len(self.timer.segments):
+                # 会话在关闭期间已完成
+                if focus_accumulated > 0:
+                    self._record_focus(focus_accumulated)
+                self._refresh_events()
+                try:
+                    os.remove(self.session_file)
+                except OSError:
+                    pass
+                return False
+
+        self.timer.restore_state(state, current_idx, max(0, segment_remaining),
+                                 focus_accumulated, focus_total)
+        # 更新 UI
+        seg_type, seg_min = self.timer.segments[current_idx]
+        self.timer.on_segment_change(seg_type, seg_min, current_idx,
+                                     len(self.timer.segments),
+                                     focus_accumulated, focus_total)
+        self._update_timer_display(max(0, segment_remaining))
+        if self.focus_topic:
+            self.topic_label.config(text=self.focus_topic)
+        if state == Timer.RUNNING:
+            self._redraw_btn(self.toggle_btn, "⏸")
+            self.timer.state = Timer.RUNNING
+            self.timer._tick()
+        elif state == Timer.PAUSED:
+            self._redraw_btn(self.toggle_btn, "▶")
+        return True
+
     def _load_stats(self):
         try:
             if os.path.exists(self.stats_file):
@@ -516,7 +656,7 @@ class FlowTickApp:
         self._save_stats()
 
         # 自动记录到事件
-        now = datetime.now().strftime("%m-%d %H:%M")
+        now = datetime.now().strftime("%Y-%m-%d %H:%M")
         self.events.append({
             "time": now,
             "topic": self.focus_topic or "未命名专注",
@@ -562,8 +702,11 @@ class FlowTickApp:
             item.pack(fill=tk.X, padx=6, pady=2)
 
             # 时间
+            time_display = ev.get("time", "")
+            if len(time_display) >= 10:
+                time_display = time_display[5:]
             tk.Label(
-                item, text=ev.get("time", ""), font=(FTK, 9),
+                item, text=time_display, font=(FTK, 9),
                 fg=_C["mute"], bg=_C["item_bg"],
             ).pack(side=tk.LEFT, padx=(8, 6), pady=4)
 
@@ -595,14 +738,24 @@ class FlowTickApp:
         self.events_log_canvas.configure(scrollregion=self.events_log_canvas.bbox("all"))
 
     def _delete_event_at(self, idx):
-        self.events.pop(idx)
+        ev = self.events.pop(idx)
         self._save_events()
+        date_str = ev["time"][:10]
+        if date_str in self.stats:
+            s = self.stats[date_str]
+            s["count"] = max(0, s["count"] - 1)
+            s["minutes"] = max(0, s["minutes"] - ev.get("minutes", 0))
+            if ev.get("topic") and ev["topic"] in s.get("topics", []):
+                s["topics"].remove(ev["topic"])
+            if s["count"] == 0:
+                del self.stats[date_str]
+            self._save_stats()
         self._refresh_events()
 
     def _delete_event_from_stats(self, idx):
         ev = self.events.pop(idx)
         self._save_events()
-        date_str = str(datetime.now().year) + "-" + ev["time"][:5]
+        date_str = ev["time"][:10]
         if date_str in self.stats:
             s = self.stats[date_str]
             s["count"] = max(0, s["count"] - 1)
@@ -760,24 +913,57 @@ class FlowTickApp:
         ind.pack(side=tk.LEFT, fill=tk.Y)
 
         fg = _C["sb_sel"] if selected else _C["sb_text"]
-        fnt = (FTK, 10, "bold") if selected else (FTK, 10)
+        fnt = (FTK, 11, "bold") if selected else (FTK, 11)
         lbl = tk.Label(wrapper, text=name, font=fnt, fg=fg, bg=_C["sidebar"],
                        cursor="hand2", anchor="w", padx=6)
         lbl.pack(side=tk.LEFT, fill=tk.X, expand=True, pady=4)
+        wrapper._lbl = lbl
+
+        # 省略号截断
+        max_w = self._folder_panel_width - 15
+        self._truncate_label(lbl, name, max_w)
+
+        # 条件 tooltip
+        tip_win = {"win": None}
+
+        def show_tip(e):
+            if getattr(lbl, '_truncated', False) and not tip_win["win"]:
+                x = lbl.winfo_rootx()
+                y = lbl.winfo_rooty() + lbl.winfo_height() + 2
+                win = tk.Toplevel(self.root)
+                win.overrideredirect(True)
+                win.attributes("-topmost", True)
+                win.geometry(f"+{x}+{y}")
+                tk.Label(win, text=lbl._full_name, font=(FTK, 9),
+                         fg=_C["pri"], bg=_C["card"], relief="solid", bd=1, padx=6, pady=2).pack()
+                tip_win["win"] = win
+
+        def hide_tip(e):
+            if tip_win["win"]:
+                tip_win["win"].destroy()
+                tip_win["win"] = None
 
         def hover(e):
+            show_tip(e)
             if not (self._current_folder == folder_id):
                 lbl.config(fg=_C["sb_sel"])
                 ind.config(bg=_C["sb_hover"])
             wrapper.config(bg=_C["sb_hover"])
 
         def leave(e):
+            hide_tip(e)
             lbl.config(fg=_C["sb_sel"] if (self._current_folder == folder_id) else _C["sb_text"])
             ind.config(bg=_C["sb_sel"] if (self._current_folder == folder_id) else _C["sidebar"])
             wrapper.config(bg=_C["sidebar"])
 
         def click(e):
             self._select_folder(folder_id)
+
+        def cleanup(e):
+            if tip_win["win"]:
+                tip_win["win"].destroy()
+                tip_win["win"] = None
+        wrapper.bind("<Destroy>", cleanup)
 
         for w in (wrapper, lbl, ind):
             w.bind("<Enter>", hover)
@@ -1069,19 +1255,32 @@ class FlowTickApp:
         c.create_line(12, 42, w - 12, 42, fill=_C["border"], width=1, tags="st_bg")
         c.create_window(10, 48, window=self._stats_outer, anchor="nw",
                         width=w - 20, height=h - 52, tags="st_bg")
+        # 图表宽度自适应
+        chart_w = w - 40
+        if chart_w != getattr(self, '_st_chart_w', 0):
+            self._st_chart_w = chart_w
+            self._redraw_stats_charts(chart_w)
 
-    def _draw_weekly_chart(self, parent, week_data):
+    def _redraw_stats_charts(self, chart_w):
+        """根据宽度重绘统计图表"""
+        if getattr(self, '_st_week_cv', None):
+            self._st_week_cv.delete("all")
+            self._st_week_cv.config(width=chart_w)
+            self._draw_weekly_chart(self._st_week_cv, chart_w,
+                                    getattr(self, '_st_week_data', {}))
+        if getattr(self, '_st_trend_cv', None):
+            self._st_trend_cv.delete("all")
+            self._st_trend_cv.config(width=chart_w)
+            self._draw_trend_chart(self._st_trend_cv, chart_w,
+                                   getattr(self, '_st_trend_data', []))
+
+    def _draw_weekly_chart(self, cv, chart_w, week_data):
         """绘制本周每日柱状图，week_data: {0: minutes, 1: minutes, ...} 周一=0"""
         days_label = ["一", "二", "三", "四", "五", "六", "日"]
         chart_h = 100
-        chart_w = 280
-        bar_w = 24
-        gap = (chart_w - 7 * bar_w) // 8
+        bar_w = max(16, (chart_w - 40) // 7 - 4)
+        gap = max(4, (chart_w - 7 * bar_w) // 8)
         today_weekday = datetime.now().date().weekday()
-
-        cv = tk.Canvas(parent, width=chart_w, height=chart_h + 20,
-                       bg=_C["card"], highlightthickness=0)
-        cv.pack(pady=(4, 8))
 
         max_val = max(week_data.values(), default=0) or 1
 
@@ -1101,6 +1300,48 @@ class FlowTickApp:
             cv.create_text(x + bar_w // 2, chart_h + 10,
                            text=days_label[i], font=(FTK, 9),
                            fill=_C["accent"] if i == today_weekday else _C["sec"])
+
+    def _draw_trend_chart(self, cv, chart_w, trend_data):
+        """绘制近 14 天趋势折线图，trend_data: [(date, minutes), ...]"""
+        n = len(trend_data)
+        if n == 0:
+            return
+        chart_h = 100
+        pad_x = 20
+        usable_w = chart_w - pad_x * 2
+        step = usable_w / (n - 1) if n > 1 else 0
+        max_m = max(m for _, m in trend_data) or 1
+        today_date = datetime.now().date()
+
+        # 计算坐标
+        points = []
+        for i, (d, mins) in enumerate(trend_data):
+            x = pad_x + i * step
+            y = chart_h - int(mins / max_m * (chart_h - 20)) if mins > 0 else chart_h
+            points.append((x, y, d, mins))
+
+        # 画折线
+        if len(points) >= 2:
+            coords = []
+            for x, y, _, _ in points:
+                coords.extend([x, y])
+            cv.create_line(coords, fill=_C["accent"], width=2, smooth=True)
+
+        # 画数据点和标签
+        for i, (x, y, d, mins) in enumerate(points):
+            is_today = (d == today_date)
+            dot_r = 4 if is_today else 3
+            dot_color = _C["accent"] if is_today else _C["sec"]
+            cv.create_oval(x - dot_r, y - dot_r, x + dot_r, y + dot_r,
+                           fill=dot_color, outline=_C["card"], width=2)
+            if mins > 0:
+                cv.create_text(x, y - 10, text=str(mins), font=(FTK, 8),
+                               fill=_C["sec"])
+            # 日期标签（每 3 天一个）
+            if i % 3 == 0:
+                cv.create_text(x, chart_h + 10, text=d.strftime("%m/%d"),
+                               font=(FTK, 9),
+                               fill=_C["accent"] if is_today else _C["mute"])
 
     def _refresh_stats_page(self):
         for w in self.stats_inner.winfo_children():
@@ -1158,7 +1399,48 @@ class FlowTickApp:
                     week_data[d.weekday()] = v["minutes"]
             except ValueError:
                 pass
-        self._draw_weekly_chart(self.stats_inner, week_data)
+        self._st_week_data = week_data
+        self._st_week_cv = tk.Canvas(self.stats_inner, width=280, height=120,
+                                      bg=_C["card"], highlightthickness=0)
+        self._st_week_cv.pack(fill=tk.X, pady=(4, 8))
+
+        # 近 14 天趋势
+        trend_data = []
+        for i in range(13, -1, -1):
+            d = today - timedelta(days=i)
+            ds = d.strftime("%Y-%m-%d")
+            trend_data.append((d, stats.get(ds, {}).get("minutes", 0)))
+        self._st_trend_data = trend_data
+        self._st_trend_cv = tk.Canvas(self.stats_inner, width=280, height=124,
+                                       bg=_C["card"], highlightthickness=0)
+        self._st_trend_cv.pack(fill=tk.X, pady=(4, 8))
+
+        # 图表初始绘制
+        self._st_chart_w = 0
+        w = self.stats_canvas.winfo_width()
+        if w > 60:
+            self._redraw_stats_charts(w - 40)
+
+        # 事项统计
+        topic_stats = {}
+        for ev in self.events:
+            topic = ev.get("topic", "未命名专注")
+            mins = ev.get("minutes", 0)
+            if topic not in topic_stats:
+                topic_stats[topic] = {"count": 0, "minutes": 0}
+            topic_stats[topic]["count"] += 1
+            topic_stats[topic]["minutes"] += mins
+        if topic_stats:
+            tk.Label(self.stats_inner, text="事项统计", font=(FTK, 13, "bold"),
+                     fg=_C["pri"], bg=_C["card"]).pack(anchor="w", pady=(8, 4))
+            sorted_topics = sorted(topic_stats.items(), key=lambda x: x[1]["minutes"], reverse=True)[:10]
+            for topic, s in sorted_topics:
+                row = tk.Frame(self.stats_inner, bg=_C["card"])
+                row.pack(fill=tk.X, padx=(8, 0), pady=1)
+                tk.Label(row, text=topic, font=(FTK, 10),
+                         fg=_C["pri"], bg=_C["card"], anchor="w").pack(side=tk.LEFT, fill=tk.X, expand=True)
+                tk.Label(row, text=f"{s['count']} 次 / {_fmt(s['minutes'])}",
+                         font=(FTK, 9), fg=_C["sec"], bg=_C["card"]).pack(side=tk.RIGHT)
 
         # 每日记录（按周分组）
         tk.Label(self.stats_inner, text="专注记录", font=(FTK, 13, "bold"),
@@ -1173,7 +1455,12 @@ class FlowTickApp:
             date_events = OrderedDict()
             for idx, ev in enumerate(self.events):
                 time_str = ev.get("time", "")
-                date_str = time_str[:5] if len(time_str) >= 5 else "??-??"
+                if len(time_str) >= 10:
+                    date_str = time_str[:10]
+                elif len(time_str) >= 5:
+                    date_str = str(datetime.now().year) + "-" + time_str[:5]
+                else:
+                    date_str = "??-??"
                 if date_str not in date_events:
                     date_events[date_str] = []
                 date_events[date_str].append((idx, ev))
@@ -1182,7 +1469,7 @@ class FlowTickApp:
             weeks = OrderedDict()
             for ds in reversed(list(date_events.keys())):
                 try:
-                    d = datetime.strptime(f"{datetime.now().year}-{ds}", "%Y-%m-%d").date()
+                    d = datetime.strptime(ds, "%Y-%m-%d").date()
                     iso_year, iso_week, _ = d.isocalendar()
                     key = (iso_year, iso_week)
                     if key not in weeks:
@@ -1196,7 +1483,7 @@ class FlowTickApp:
                 w_c = sum(len(date_events[ds]) for ds in date_list)
                 w_m = sum(ev.get("minutes", 0) for ds in date_list for _, ev in date_events[ds])
                 try:
-                    week_date = datetime.strptime(f"{year}-W{week_num:02d}-1", "%Y-W%W-%w").date()
+                    week_date = datetime.strptime(f"{year}-W{week_num:02d}-1", "%G-W%V-%u").date()
                     week_end = week_date + timedelta(days=6)
                     range_str = f"{week_date.strftime('%m/%d')} - {week_end.strftime('%m/%d')}"
                 except Exception:
@@ -1215,7 +1502,7 @@ class FlowTickApp:
                 for ds in date_list:
                     day_row = tk.Frame(self.stats_inner, bg=_C["card"])
                     day_row.pack(fill=tk.X, padx=(16, 0), pady=(4, 1))
-                    tk.Label(day_row, text=ds, font=(FTK, 10, "bold"),
+                    tk.Label(day_row, text=ds[5:] if len(ds) >= 10 else ds, font=(FTK, 10, "bold"),
                              fg=_C["sec"], bg=_C["card"], width=8, anchor="w").pack(side=tk.LEFT)
 
                     ev_list = date_events[ds]
@@ -1229,8 +1516,10 @@ class FlowTickApp:
                         ev_row = tk.Frame(self.stats_inner, bg=_C["card"])
                         ev_row.pack(fill=tk.X, padx=(32, 0), pady=1)
                         time_label = ev.get("time", "")
-                        if len(time_label) >= 6:
-                            time_label = time_label[6:]  # "HH:MM"
+                        if len(time_label) >= 11:
+                            time_label = time_label[11:]  # "HH:MM"
+                        elif len(time_label) >= 6:
+                            time_label = time_label[6:]
                         tk.Label(ev_row, text=time_label, font=(FTK, 9),
                                  fg=_C["mute"], bg=_C["card"], width=6, anchor="w").pack(side=tk.LEFT)
                         tk.Label(ev_row, text=ev.get("topic", ""), font=(FTK, 10),
@@ -1351,7 +1640,7 @@ class FlowTickApp:
         add_toggle("idle_detection", "闲置检测（无操作自动暂停）")
         add_spin("idle_timeout_min", "闲置超时（分钟）", 1, 30)
 
-        tk.Label(card, text="FlowTick V2.0", font=(FTK, 9),
+        tk.Label(card, text="FlowTick V2.1", font=(FTK, 9),
                  fg=_C["mute"], bg=_C["card"]).pack(pady=(20, 0))
 
         self._settings_outer.update_idletasks()
@@ -1487,6 +1776,7 @@ class FlowTickApp:
         self.root.focus_force()
 
     def _quit_from_tray(self, icon=None, item=None):
+        self._save_session()
         self._tray_running = False
         self._tray_icon.stop()
         self.root.after(0, self.root.destroy)
@@ -1500,9 +1790,10 @@ class FlowTickApp:
             on_segment_change=self._on_segment_change,
             on_session_end=self._on_session_end,
         )
-        self._build_session()
-        first_seg_min = self.timer.segments[0][1] if self.timer.segments else 25
-        self._update_timer_display(first_seg_min * 60)
+        if not self._load_session():
+            self._build_session()
+            first_seg_min = self.timer.segments[0][1] if self.timer.segments else 25
+            self._update_timer_display(first_seg_min * 60)
 
     def _build_session(self):
         s = self.settings
@@ -1575,6 +1866,7 @@ class FlowTickApp:
         self._refresh_events()
         if self._tray_running:
             self._tray_icon.title = "FlowTick - 会话完成"
+        self._save_session()
 
     def _update_timer_display(self, seconds):
         m, s = divmod(seconds, 60)
@@ -1590,6 +1882,7 @@ class FlowTickApp:
         elif self.timer.state == Timer.RUNNING:
             self.timer.pause()
             self._redraw_btn(self.toggle_btn, "▶")
+        self._save_session()
 
     def _redraw_btn(self, btn, text):
         w, h = int(btn.cget("width")), int(btn.cget("height"))
@@ -1598,6 +1891,25 @@ class FlowTickApp:
                                 fill=_C["card"], outline=_C["border"])
         btn.create_text(w // 2, h // 2, text=text, font=(FTK, 14), fill=_C["pri"])
         btn._text = text
+
+    def _on_terminate(self):
+        if self.timer.state == Timer.IDLE:
+            return
+        focus_acc = self.timer.focus_accumulated
+        if self.timer._job:
+            self.root.after_cancel(self.timer._job)
+            self.timer._job = None
+        self.timer.state = Timer.IDLE
+        if focus_acc > 0:
+            self._record_focus(focus_acc)
+        self.mode_label.config(text="已终止")
+        self.topic_label.config(text=f"已专注 {focus_acc} 分钟")
+        self._update_timer_display(0)
+        self._redraw_btn(self.toggle_btn, "▶")
+        self._refresh_events()
+        if self._tray_running:
+            self._tray_icon.title = "FlowTick - 已终止"
+        self._save_session()
 
     def _on_reset(self):
         self.timer.reset()
@@ -1609,6 +1921,7 @@ class FlowTickApp:
         if self._tray_running:
             self._tray_icon.title = "FlowTick"
         self._redraw_btn(self.toggle_btn, "▶")
+        self._save_session()
 
     def _on_skip(self):
         self.timer.skip_segment()

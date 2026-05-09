@@ -63,7 +63,7 @@ def _bind_tooltip(widget, text):
         win.attributes("-topmost", True)
         win.geometry(f"+{x}+{y}")
         lbl = tk.Label(win, text=text, font=(FTK, 9),
-                       fg=_C["pri"], bg="#ffffe0", relief="solid", bd=1, padx=6, pady=2)
+                       fg=_C["pri"], bg=_C["card"], relief="solid", bd=1, padx=6, pady=2)
         lbl.pack()
         tip["win"] = win
 
@@ -74,6 +74,12 @@ def _bind_tooltip(widget, text):
 
     widget.bind("<Enter>", enter, add="+")
     widget.bind("<Leave>", leave, add="+")
+
+    def destroy_tip(e):
+        if tip["win"]:
+            tip["win"].destroy()
+            tip["win"] = None
+    widget.bind("<Destroy>", destroy_tip, add="+")
 
 
 def _win_notify(title, message):

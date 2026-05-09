@@ -20,6 +20,7 @@ class Timer:
         self.focus_accumulated = 0
         self.focus_total = 0
         self._job = None
+        self._tick_running = False
 
     def build_session(self, focus_total_min, focus_block, break_min, long_break_min, long_interval):
         """根据总专注时长和节奏参数，预计算所有 segments"""
@@ -91,8 +92,11 @@ class Timer:
         if self._job:
             self.root.after_cancel(self._job)
             self._job = None
-        # 跳过的专注段不计入 focus_accumulated
-        self._advance()
+        self.segment_remaining = 0
+        # 如果有 pending tick（_tick 执行中），让它自然处理 segment_remaining <= 0
+        # 否则直接推进
+        if not self._tick_running:
+            self._advance()
 
     def reset(self):
         if self._job:
@@ -102,6 +106,14 @@ class Timer:
         self.current_idx = 0
         self.segment_remaining = 0
         self.focus_accumulated = 0
+
+    def restore_state(self, state, current_idx, segment_remaining, focus_accumulated, focus_total):
+        """恢复持久化的会话状态（调用前需先 build_session）"""
+        self.state = state
+        self.current_idx = current_idx
+        self.segment_remaining = segment_remaining
+        self.focus_accumulated = focus_accumulated
+        self.focus_total = focus_total
 
     def _begin_segment(self):
         """开始当前 index 对应的 segment"""
@@ -115,7 +127,9 @@ class Timer:
         self._tick()
 
     def _tick(self):
+        self._tick_running = True
         if self.state != self.RUNNING:
+            self._tick_running = False
             return
         self.on_tick(self.segment_remaining)
         if self.segment_remaining <= 0:
@@ -123,12 +137,19 @@ class Timer:
             if seg_type == self.FOCUS:
                 self.focus_accumulated += seg_min
             self._advance()
+            self._tick_running = False
             return
         self.segment_remaining -= 1
         self._job = self.root.after(1000, self._tick)
+        self._tick_running = False
 
     def _advance(self):
         """推进到下一个 segment 或结束会话"""
+        # 所有专注已完成，直接结束
+        if self.focus_accumulated >= self.focus_total and self.focus_total > 0:
+            self.state = self.IDLE
+            self.on_session_end(self.focus_accumulated)
+            return
         self.current_idx += 1
         if self.current_idx >= len(self.segments):
             self.state = self.IDLE

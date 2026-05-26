@@ -28,9 +28,10 @@ class FlowTickApp:
         sy = (self.root.winfo_screenheight() - WINDOW_HEIGHT) // 2
         self.root.geometry(f"{WINDOW_WIDTH}x{WINDOW_HEIGHT}+{sx}+{sy}")
 
-        # Logo
+        # Logo（白底用于任务栏，透明用于托盘）
         _script_dir = sys._MEIPASS if getattr(sys, 'frozen', False) else os.path.dirname(os.path.abspath(__file__))
-        self._logo_path = os.path.join(_script_dir, "fig", "LOGO_1.png")
+        self._logo_path = os.path.join(_script_dir, "fig", "LOGO.png")
+        self._tray_logo_path = os.path.join(_script_dir, "fig", "LOGO_icon.png")
         if os.path.exists(self._logo_path):
             try:
                 _logo = tk.PhotoImage(file=self._logo_path)
@@ -44,7 +45,7 @@ class FlowTickApp:
             os.makedirs(base_dir, exist_ok=True)
             # 迁移旧位置数据
             old_dir = os.path.dirname(sys.executable)
-            for fname in ["notes.json", "events.json", "stats.json", "settings.json", "todos.json"]:
+            for fname in ["notes.json", "events.json", "stats.json", "settings.json", "todos.json", "folders.json"]:
                 old_path = os.path.join(old_dir, fname)
                 new_path = os.path.join(base_dir, fname)
                 if os.path.exists(old_path) and not os.path.exists(new_path):
@@ -1125,21 +1126,14 @@ class FlowTickApp:
                 circ.create_oval(3, 3, 19, 19, fill="", outline=_C["border"], width=1.5)
             circ.bind("<Button-1>", lambda e, i=idx: self._toggle_todo_at(i))
 
-            # 文字
-            font_spec = (FTK, 11)
-            text = td["text"]
-            if td.get("done"):
-                display = self._truncate(text, font_spec, max(item.winfo_width() - 80, 100))
-                lbl = tk.Label(item, text=display, font=font_spec,
-                               fg=_C["mute"], bg=_C["item_bg"], anchor="w")
-                # 画删除线需要 Canvas，用 Label 的 overstrike 替代
-                lbl.configure(font=(FTK, 11, "overstrike"))
-            else:
-                display = self._truncate(text, font_spec, max(item.winfo_width() - 80, 100))
-                lbl = tk.Label(item, text=display, font=font_spec,
-                               fg=_C["pri"], bg=_C["item_bg"], anchor="w")
+            # 文字（占满整行，双击编辑）
+            font_spec = (FTK, 11, "overstrike") if td.get("done") else (FTK, 11)
+            fg_color = _C["mute"] if td.get("done") else _C["pri"]
+            lbl = tk.Label(item, text=td["text"], font=font_spec,
+                           fg=fg_color, bg=_C["item_bg"], anchor="w", cursor="hand2")
             lbl.pack(side=tk.LEFT, fill=tk.X, expand=True, pady=6)
-            lbl.bind("<Button-1>", lambda e, i=idx: self._toggle_todo_at(i))
+            circ.bind("<Button-1>", lambda e, i=idx: self._toggle_todo_at(i))
+            lbl.bind("<Double-1>", lambda e, i=idx: self._edit_todo_at(i, e.widget))
 
             # 完成时间
             if td.get("done") and td.get("done_time"):
@@ -1166,7 +1160,7 @@ class FlowTickApp:
 
     def _add_todo(self):
         text = self._td_search.get().strip()
-        if not text:
+        if not text or text == "添加待办...":
             return
         self.todos.append({"text": text, "done": False, "done_time": ""})
         self._td_search.delete(0, tk.END)
@@ -1188,6 +1182,15 @@ class FlowTickApp:
         self.todos.pop(idx)
         self._save_todos()
         self._refresh_todos()
+
+    def _edit_todo_at(self, idx, lbl):
+        """双击待办文字，弹窗编辑"""
+        old_text = self.todos[idx]["text"]
+        dlg = FolderDialog(self.root, "编辑待办", initial=old_text)
+        if dlg.result:
+            self.todos[idx]["text"] = dlg.result
+            self._save_todos()
+            self._refresh_todos()
 
     def _clear_done_todos(self):
         self.todos = [t for t in self.todos if not t.get("done")]
@@ -1640,7 +1643,7 @@ class FlowTickApp:
         add_toggle("idle_detection", "闲置检测（无操作自动暂停）")
         add_spin("idle_timeout_min", "闲置超时（分钟）", 1, 30)
 
-        tk.Label(card, text="FlowTick V2.1", font=(FTK, 9),
+        tk.Label(card, text="FlowTick V2.2", font=(FTK, 9),
                  fg=_C["mute"], bg=_C["card"]).pack(pady=(20, 0))
 
         self._settings_outer.update_idletasks()
@@ -1738,11 +1741,12 @@ class FlowTickApp:
     # ── 系统托盘 ──────────────────────────────────────────
 
     def _make_tray_icon(self):
-        """加载 LOGO 作为托盘图标"""
+        """加载透明 LOGO 作为托盘图标"""
         from PIL import Image
-        if os.path.exists(self._logo_path):
+        _path = self._tray_logo_path if os.path.exists(self._tray_logo_path) else self._logo_path
+        if os.path.exists(_path):
             try:
-                return Image.open(self._logo_path).convert("RGBA").resize((64, 64))
+                return Image.open(_path).convert("RGBA").resize((64, 64))
             except Exception:
                 pass
         # fallback
@@ -1776,7 +1780,7 @@ class FlowTickApp:
         self.root.focus_force()
 
     def _quit_from_tray(self, icon=None, item=None):
-        self._save_session()
+        self.root.after(0, self._save_session)
         self._tray_running = False
         self._tray_icon.stop()
         self.root.after(0, self.root.destroy)
@@ -1836,9 +1840,7 @@ class FlowTickApp:
                 if self.settings.get("sound_enabled", True):
                     threading.Thread(target=lambda: winsound.Beep(1200, 300), daemon=True).start()
                 threading.Thread(target=lambda: _win_notify("FlowTick", "休息结束，开始专注"), daemon=True).start()
-                if self.settings.get("auto_start_focus", False):
-                    self.timer.start()
-                    self._redraw_btn(self.toggle_btn, "⏸")
+                self._redraw_btn(self.toggle_btn, "⏸")
         else:
             # 从专注进入休息
             if seg_type == Timer.LONG_BREAK:

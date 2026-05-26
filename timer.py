@@ -128,20 +128,20 @@ class Timer:
 
     def _tick(self):
         self._tick_running = True
-        if self.state != self.RUNNING:
+        try:
+            if self.state != self.RUNNING:
+                return
+            self.on_tick(self.segment_remaining)
+            if self.segment_remaining <= 0:
+                seg_type, seg_min = self.segments[self.current_idx]
+                if seg_type == self.FOCUS:
+                    self.focus_accumulated += seg_min
+                self._advance()
+                return
+            self.segment_remaining -= 1
+            self._job = self.root.after(1000, self._tick)
+        finally:
             self._tick_running = False
-            return
-        self.on_tick(self.segment_remaining)
-        if self.segment_remaining <= 0:
-            seg_type, seg_min = self.segments[self.current_idx]
-            if seg_type == self.FOCUS:
-                self.focus_accumulated += seg_min
-            self._advance()
-            self._tick_running = False
-            return
-        self.segment_remaining -= 1
-        self._job = self.root.after(1000, self._tick)
-        self._tick_running = False
 
     def _advance(self):
         """推进到下一个 segment 或结束会话"""

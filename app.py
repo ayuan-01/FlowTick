@@ -29,20 +29,19 @@ class FlowTickApp:
         self.root.geometry(f"{WINDOW_WIDTH}x{WINDOW_HEIGHT}+{sx}+{sy}")
 
         # Logo（白底用于任务栏，透明用于托盘）
-        if getattr(sys, 'frozen', False):
-            _script_dir = sys._MEIPASS
-        elif hasattr(sys, '_MEIPASS'):
-            _script_dir = sys._MEIPASS
-        else:
-            _script_dir = os.path.dirname(os.path.abspath(__file__))
-        self._logo_path = os.path.join(_script_dir, "fig", "LOGO.png")
-        self._tray_logo_path = os.path.join(_script_dir, "fig", "LOGO_icon.png")
-        if os.path.exists(self._logo_path):
-            try:
+        try:
+            if getattr(sys, 'frozen', False):
+                _script_dir = sys._MEIPASS
+            else:
+                _script_dir = os.path.dirname(os.path.abspath(__file__))
+            self._logo_path = os.path.join(_script_dir, "fig", "LOGO.png")
+            self._tray_logo_path = os.path.join(_script_dir, "fig", "LOGO_icon.png")
+            if os.path.exists(self._logo_path):
                 _logo = tk.PhotoImage(file=self._logo_path)
                 self.root.iconphoto(True, _logo)
-            except Exception:
-                pass
+        except Exception:
+            self._logo_path = ""
+            self._tray_logo_path = ""
 
         # 路径
         if getattr(sys, 'frozen', False) or hasattr(sys, '_MEIPASS'):

@@ -22,6 +22,7 @@ DEFAULT_SETTINGS = {
     "rhythm_break": 5,
     "rhythm_long_break": 15,
     "rhythm_long_interval": 4,
+    "daily_goal_pomodoros": 8,
     "idle_detection": False,
     "idle_timeout_min": 5,
 }

@@ -282,3 +282,50 @@ def _sb_btn(parent, label, command, selected=False):
         w.bind("<Leave>", leave)
         w.bind("<Button-1>", click)
     return wrapper
+
+
+def _confirm_dialog(parent, title="确认", message="确定要删除吗？"):
+    """确认弹窗，返回 True/False"""
+    dlg = tk.Toplevel(parent)
+    dlg.title(title)
+    dlg.transient(parent)
+    dlg.grab_set()
+    dlg.resizable(False, False)
+    dlg.configure(bg=_C["bg"])
+
+    card = tk.Frame(dlg, bg=_C["card"], padx=16, pady=16)
+    card.pack(padx=8, pady=4, fill=tk.X)
+
+    tk.Label(card, text=title, font=(FTK, 13, "bold"),
+             fg=_C["pri"], bg=_C["card"]).pack(anchor="w", pady=(0, 8))
+    tk.Label(card, text=message, font=(FTK, 11),
+             fg=_C["sec"], bg=_C["card"], wraplength=280, justify="left").pack(anchor="w", pady=(0, 14))
+
+    result = [False]
+
+    def on_ok():
+        result[0] = True
+        dlg.destroy()
+
+    btn_row = tk.Frame(card, bg=_C["card"])
+    btn_row.pack(fill=tk.X)
+
+    confirm_btn = _canvas_btn(btn_row, "确定", on_ok, w=70)
+    confirm_btn.pack(side=tk.RIGHT, padx=(8, 0))
+    cancel_btn = _canvas_btn(btn_row, "取消", dlg.destroy, w=70)
+    cancel_btn.pack(side=tk.RIGHT)
+
+    # 居中
+    dlg.withdraw()
+    dlg.update_idletasks()
+    w = max(320, dlg.winfo_reqwidth())
+    h = max(160, dlg.winfo_reqheight())
+    px = parent.winfo_rootx() + (parent.winfo_width() - w) // 2
+    py = parent.winfo_rooty() + (parent.winfo_height() - h) // 2
+    dlg.geometry(f"{w}x{h}+{px}+{py}")
+    dlg.deiconify()
+
+    dlg.bind("<Return>", lambda e: on_ok())
+    dlg.bind("<Escape>", lambda e: dlg.destroy())
+    dlg.wait_window()
+    return result[0]

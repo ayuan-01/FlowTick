@@ -51,7 +51,7 @@
 
 ## 截图
 
-![image-20260508113514126](https://cdn.jsdelivr.net/gh/ayuan-01/image-bed/fig/image-20260508113514126.png)
+![image-20260530140731349](https://cdn.jsdelivr.net/gh/ayuan-01/image-bed/fig/image-20260530140731349.png)
 
 ## 快速开始
 

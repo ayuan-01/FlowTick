@@ -312,29 +312,30 @@ class FlowTickApp:
         )
         self.status_label.pack(pady=(0, 0))
 
-        self.timer_box = tk.Canvas(
-            right, width=200, height=100,
-            bg=_C["card"], highlightthickness=0,
-        )
-        self.timer_box.pack(pady=(20, 0))
-        # 中心填充（card 色遮罩，避免弧与文字重叠）
-        self.timer_box.create_oval(58, 8, 142, 92, fill=_C["card"], outline="")
-        # 背景弧
-        self._arc_bg = self.timer_box.create_arc(
-            55, 5, 145, 95, start=90, extent=-270,
-            style="arc", width=4, outline=_C["border"],
-        )
-        # 进度弧
-        self._arc_progress = self.timer_box.create_arc(
-            55, 5, 145, 95, start=90, extent=0,
-            style="arc", width=4, outline=_C["accent"],
-        )
-        # 计时文字
         self.timer_label = tk.Label(
-            self.timer_box, text="25:00", font=("Consolas", 26, "bold"),
+            right, text="25:00", font=("Consolas", 30, "bold"),
             bg=_C["card"], fg=_C["pri"],
         )
-        self.timer_box.create_window(100, 50, window=self.timer_label)
+        self.timer_label.pack(pady=(24, 0))
+
+        # 横线进度条
+        self._progress_cv = tk.Canvas(
+            right, width=200, height=8,
+            bg=_C["card"], highlightthickness=0,
+        )
+        self._progress_cv.pack(pady=(6, 0))
+        self._line_y = 4
+        self._line_x1, self._line_x2 = 24, 176
+        self._dot_r = 4
+        self._progress_cv.create_line(
+            self._line_x1, self._line_y, self._line_x2, self._line_y,
+            fill=_C["border"], width=2, capstyle="round",
+        )
+        self._progress_dot = self._progress_cv.create_oval(
+            self._line_x1 - self._dot_r, self._line_y - self._dot_r,
+            self._line_x1 + self._dot_r, self._line_y + self._dot_r,
+            fill=_C["border"], outline="",
+        )
         self._arc_total = 0
 
         self._btn_row = tk.Frame(right, bg=_C["card"])
@@ -2031,11 +2032,16 @@ class FlowTickApp:
     def _update_timer_display(self, seconds):
         m, s = divmod(seconds, 60)
         self.timer_label.config(text=f"{m:02d}:{s:02d}")
-        # 更新进度弧
+        # 更新进度点
         if self._arc_total > 0:
             elapsed = self._arc_total - seconds
             ratio = max(0, min(1, elapsed / self._arc_total))
-            self.timer_box.itemconfig(self._arc_progress, extent=int(-270 * ratio))
+            x = self._line_x1 + ratio * (self._line_x2 - self._line_x1)
+            r = self._dot_r
+            self._progress_cv.coords(
+                self._progress_dot,
+                x - r, self._line_y - r, x + r, self._line_y + r,
+            )
 
     def _update_goal_indicator(self):
         """更新今日目标进度小圆点"""
@@ -2108,7 +2114,12 @@ class FlowTickApp:
         self._build_session()
         first_seg_min = self.timer.segments[0][1] if self.timer.segments else 25
         self._arc_total = 0
-        self.timer_box.itemconfig(self._arc_progress, extent=0)
+        r = self._dot_r
+        self._progress_cv.coords(
+            self._progress_dot,
+            self._line_x1 - r, self._line_y - r,
+            self._line_x1 + r, self._line_y + r,
+        )
         self._update_timer_display(first_seg_min * 60)
         self.topic_label.config(text=self.focus_topic if self.focus_topic else "准备就绪")
         self.mode_label.config(text="专注")

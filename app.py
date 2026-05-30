@@ -81,9 +81,9 @@ class FlowTickApp:
         self._refresh_events()
         self._refresh_notes()
         self._refresh_todos()
+        self._tray_running = False
         self._init_timer()
         self._update_clock()
-        self._tray_running = False
         self._init_tray()
         self._apply_settings()
 
